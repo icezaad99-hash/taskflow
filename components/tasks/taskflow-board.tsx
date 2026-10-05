@@ -235,25 +235,24 @@ export function TaskFlowBoard({ mode = "board" }: { mode?: BoardMode }) {
     document.getElementById(`task-${taskId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [isTrash, loading, tasks]);
 
-  const canEditTask = useCallback(
-  (task: BoardTask) => {
-    if (!isActive || !user) return false;
+    const canEditTask = useCallback(
+    (task: BoardTask) => {
+      if (!isActive || !user) return false;
 
-    // 1. Admin, GL, TL ย้ายได้ทุกงานบนบอร์ด
-    if (role === "admin" || role === "gl" || role === "tl" || role === "Admin" || role === "GL" || role === "TL") {
-      return true;
-    }
+      // 1. Admin, GL, TL ย้ายได้ทุกงาน
+      if (
+        role === "admin" ||
+        role === "gl" ||
+        role === "tl"
+      ) {
+        return true;
+      }
 
-    // 2. Member ย้ายได้เฉพาะงานตัวเอง (ที่สร้างเอง หรือเป็นผู้รับผิดชอบ)
-    return task.creator_id === user.id || task.assignee_id === user.id;
-  },
-  [isActive, role, user]
-);
-
-    return false;
-  },
-  [isActive, role, user, profiles]
-);
+      // 2. Member ย้ายได้เฉพาะงานตัวเอง (ที่สร้างเอง หรือเป็นผู้รับผิดชอบ)
+      return task.creator_id === user.id || task.assignee_id === user.id;
+    },
+    [isActive, role, user]
+    );
   const canTrashTaskForUser = useCallback(
     (task: BoardTask) => isActive && canTrashTask(role, user?.id, task),
     [isActive, role, user?.id]
