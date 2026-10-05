@@ -239,24 +239,16 @@ export function TaskFlowBoard({ mode = "board" }: { mode?: BoardMode }) {
   (task: BoardTask) => {
     if (!isActive || !user) return false;
 
-    // 1. ถ้าเป็น Admin หรือ GL สามารถย้ายได้ทุกงาน
-    if (role === "admin" || role === "gl" || role === "Admin" || role === "GL") {
+    // 1. Admin, GL, TL ย้ายได้ทุกงานบนบอร์ด
+    if (role === "admin" || role === "gl" || role === "tl" || role === "Admin" || role === "GL" || role === "TL") {
       return true;
     }
 
-    // 2. ถ้าเป็นคนสร้างงาน หรือ เป็นผู้รับผิดชอบงานนั้นๆ (ทั้ง Member, TL สามารถย้ายงานตัวเองได้)
-    const isOwnerOrAssignee = task.creator_id === user.id || task.assignee_id === user.id;
-
-    // 3. ถ้าเป็น Member ย้ายได้เฉพาะงานที่ตนเองสร้างหรือได้รับมอบหมายเท่านั้น
-    if (role === "member" || role === "Member") {
-      return isOwnerOrAssignee;
-    }
-
-    // 4. ถ้าเป็น TL ย้ายงานของตัวเองได้ หรือ ย้ายงานของลูกทีมในรายชื่อ profiles ที่ TL ดูแลอยู่ได้
-    if (role === "tl" || role === "TL") {
-      const isTeamMemberTask = profiles.some((member) => member.id === task.assignee_id);
-      return isOwnerOrAssignee || isTeamMemberTask;
-    }
+    // 2. Member ย้ายได้เฉพาะงานตัวเอง (ที่สร้างเอง หรือเป็นผู้รับผิดชอบ)
+    return task.creator_id === user.id || task.assignee_id === user.id;
+  },
+  [isActive, role, user]
+);
 
     return false;
   },
