@@ -30,7 +30,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/context/auth-context";
 import { createClient } from "@/lib/supabase/client";
-import { canManageTask, canTrashTask, rolePermissions } from "@/lib/permissions";
+import { canTrashTask, rolePermissions } from "@/lib/permissions";
 import { Category, Profile, Task, TaskPriority, TaskStatus, Team } from "@/types/database";
 
 type BoardTask = Task & {
@@ -133,6 +133,8 @@ export function TaskFlowBoard({ mode = "board" }: { mode?: BoardMode }) {
   const [query, setQuery] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  // 🟢 เพิ่ม State สำหรับกรองวันที่ของคอลัมน์งานเสร็จแล้ว (ค่าเริ่มต้น = วันนี้)
+  const [doneDateFilter, setDoneDateFilter] = useState(localDateString());
   const [editorTask, setEditorTask] = useState<BoardTask | null | undefined>(undefined);
   const notificationTaskHandled = useRef(false);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
@@ -235,7 +237,7 @@ export function TaskFlowBoard({ mode = "board" }: { mode?: BoardMode }) {
     document.getElementById(`task-${taskId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [isTrash, loading, tasks]);
 
-    const canEditTask = useCallback(
+  const canEditTask = useCallback(
     (task: BoardTask) => {
       if (!isActive || !user) return false;
 
@@ -252,7 +254,7 @@ export function TaskFlowBoard({ mode = "board" }: { mode?: BoardMode }) {
       return task.creator_id === user.id || task.assignee_id === user.id;
     },
     [isActive, role, user]
-    );
+  );
   const canTrashTaskForUser = useCallback(
     (task: BoardTask) => isActive && canTrashTask(role, user?.id, task),
     [isActive, role, user?.id]
@@ -262,8 +264,25 @@ export function TaskFlowBoard({ mode = "board" }: { mode?: BoardMode }) {
     [canEditTask, isActive, role]
   );
   const filteredTasks = tasks.filter((task) => {
-    const matchesQuery = `${task.title} ${task.description || ""} ${task.assignee?.full_name || ""}`.toLocaleLowerCase().includes(query.toLocaleLowerCase());
-    return matchesQuery && (priorityFilter === "all" || task.priority === priorityFilter) && (categoryFilter === "all" || task.category_id === categoryFilter);
+    const matchesQuery = `${task.title} ${task.description || ""} ${task.assignee?.full_name || ""}`
+      .toLocaleLowerCase()
+      .includes(query.toLocaleLowerCase());
+
+    const matchesFilter =
+      matchesQuery &&
+      (priorityFilter === "all" || task.priority === priorityFilter) &&
+      (categoryFilter === "all" || task.category_id === categoryFilter);
+
+    if (!matchesFilter) return false;
+
+    // 🟢 ถ้าเป็นงานสถานะ "เสร็จแล้ว" (done) ให้แสดงเฉพาะงานที่ทำเสร็จตรงกับวันที่เลือก
+    if (!isTrash && taskStatus(task) === "done") {
+      const taskDoneDate = task.completed_date || (task.updated_at ? task.updated_at.slice(0, 10) : "");
+      return taskDoneDate === doneDateFilter;
+    }
+
+    // สถานะอื่นๆ (รอทำ / กำลังทำ / งานค้าง) แสดงตามปกติ
+    return true;
   });
 
   async function moveTask(taskId: string, status: TaskStatus) {
@@ -322,7 +341,7 @@ export function TaskFlowBoard({ mode = "board" }: { mode?: BoardMode }) {
   }
 
   async function softDeleteTask(task: BoardTask) {
-    if (!canEditTask(task)) return;
+    if (!canTrashTaskForUser(task)) return;
     const { error: deleteError } = await supabase.from("tasks").update({ is_deleted: true, deleted_at: new Date().toISOString() }).eq("id", task.id);
     if (deleteError) setError("ย้ายงานไปถังขยะไม่สำเร็จ");
     else {
@@ -349,11 +368,56 @@ export function TaskFlowBoard({ mode = "board" }: { mode?: BoardMode }) {
           {!isTrash && isActive && role && rolePermissions[role].canCreateTasks && <Button onClick={() => setEditorTask(null)} className="rounded-md"><Plus className="h-4 w-4" /> เพิ่มงาน</Button>}
         </div>
         {error && <div role="alert" className="mt-4 flex items-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300"><AlertCircle className="h-4 w-4 shrink-0" />{error}<button type="button" className="ml-auto" aria-label="ปิดข้อความ" onClick={() => setError("")}><X className="h-4 w-4" /></button></div>}
-        {!isTrash && <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 py-4 dark:border-slate-800">
-          <label className="relative min-w-48 flex-1 sm:max-w-xs"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input aria-label="ค้นหางาน" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหาชื่องานหรือผู้รับผิดชอบ" className="h-10 w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 dark:border-slate-700 dark:bg-slate-900" /></label>
-          <select aria-label="กรองตามความสำคัญ" value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900"><option value="all">ทุกระดับความสำคัญ</option><option value="high">สูง</option><option value="medium">กลาง</option><option value="low">ต่ำ</option></select>
-          <select aria-label="กรองตามหมวดหมู่" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900"><option value="all">ทุกหมวดหมู่</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select>
-        </div>}
+        {!isTrash && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 py-4 dark:border-slate-800">
+            <label className="relative min-w-48 flex-1 sm:max-w-xs">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                aria-label="ค้นหางาน"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="ค้นหาชื่องานหรือผู้รับผิดชอบ"
+                className="h-10 w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 dark:border-slate-700 dark:bg-slate-900"
+              />
+            </label>
+            <select
+              aria-label="กรองตามความสำคัญ"
+              value={priorityFilter}
+              onChange={(event) => setPriorityFilter(event.target.value)}
+              className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900"
+            >
+              <option value="all">ทุกระดับความสำคัญ</option>
+              <option value="high">สูง</option>
+              <option value="medium">กลาง</option>
+              <option value="low">ต่ำ</option>
+            </select>
+            <select
+              aria-label="กรองตามหมวดหมู่"
+              value={categoryFilter}
+              onChange={(event) => setCategoryFilter(event.target.value)}
+              className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900"
+            >
+              <option value="all">ทุกหมวดหมู่</option>
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+
+            {/* 🟢 เพิ่ม Date Picker สำหรับกรองวันที่งานเสร็จแล้ว */}
+            <div className="flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900">
+              <span className="text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">งานเสร็จวันที่:</span>
+              <input
+                type="date"
+                aria-label="เลือกวันที่งานเสร็จแล้ว"
+                value={doneDateFilter}
+                onChange={(e) => setDoneDateFilter(e.target.value)}
+                className="h-10 bg-transparent text-sm outline-none dark:text-slate-100"
+              />
+            </div>
+          </div>
+        )}
         {loading ? <div className="flex min-h-64 items-center justify-center gap-2 text-sm text-slate-500"><LoaderCircle className="h-4 w-4 animate-spin" /> กำลังโหลดงาน</div> : !isActive ? <div className="my-10 rounded-lg border border-slate-200 bg-white px-5 py-12 text-center dark:border-slate-800 dark:bg-slate-900"><p className="text-sm font-medium">{user ? "บัญชีนี้ยังไม่ได้รับอนุมัติหรือเปิดใช้งาน" : "เข้าสู่ระบบเพื่อดูและสร้างงาน"}</p><Link href={!user ? "/login" : profile?.status === "pending" ? "/pending-approval" : "/inactive"} className="mt-3 inline-block text-sm font-semibold text-sky-700 hover:underline dark:text-sky-300">{user ? "ตรวจสอบสถานะบัญชี" : "ไปหน้าเข้าสู่ระบบ"}</Link></div> : isTrash ? <div className="mt-5 space-y-2">
           {filteredTasks.map((task) => <div key={task.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900"><div className="min-w-0"><p className="truncate text-sm font-semibold">{task.title}</p><p className="mt-1 text-xs text-slate-500">ลบเมื่อ {task.deleted_at ? formatDate(task.deleted_at.slice(0, 10)) : "ไม่ทราบวันที่"}</p></div>{canTrashTaskForUser(task) && <Button variant="outline" size="sm" onClick={() => restoreTask(task)} className="rounded-md"><RotateCcw className="h-4 w-4" /> กู้คืน</Button>}</div>)}
           {filteredTasks.length === 0 && <p className="py-16 text-center text-sm text-slate-500">ไม่มีงานในถังขยะ</p>}
@@ -363,7 +427,6 @@ export function TaskFlowBoard({ mode = "board" }: { mode?: BoardMode }) {
     </div>
   );
 }
-
 function TaskEditor({ task, categories, profiles, allowAssignment, assignmentOnly, saving, onClose, onSave, onDelete }: {
   task: BoardTask | null;
   categories: Category[];
